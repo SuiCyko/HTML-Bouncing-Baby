@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Retro Bouncing Babies by Greg Chesser</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #gameCanvas {
+            border: 2px solid #fff;
+            image-rendering: pixelated; /* For retro scaling */
+        }
+        #gameOver {
+            position: absolute;
+            color: #fff;
+            font-size: 24px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="320" height="200"></canvas>
+    <div id="gameOver">Game Over!<br>Score: <span id="finalScore"></span><br>Press R to Restart</div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalScoreDisplay = document.getElementById('finalScore');
+
+        // Game state
+        let fireman = { x: 160, y: 180, width: 20, height: 16, speed: 5 };
+        let babies = [];
+        let score = 0;
+        let lives = 3;
+        let gameOver = false;
+        let lastSpawn = 0;
+        let spawnInterval = 2000; // Milliseconds
+
+        // CGA color palette
+        const colors = {
+            black: '#000000',
+            cyan: '#00AAAA',
+            magenta: '#AA00AA',
+            white: '#AAAAAA'
+        };
+
+        // Handle input
+        let keys = { ArrowLeft: false, ArrowRight: false };
+        document.addEventListener('keydown', (e) => {
+            if (e.key in keys) keys[e.key] = true;
+            if (e.key === 'r' && gameOver) resetGame();
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key in keys) keys[e.key] = false;
+        });
+
+        // Mouse/touch input for fireman
+        canvas.addEventListener('mousemove', (e) => {
+            if (!gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.touches[0].clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+
+        // Spawn a baby
+        function spawnBaby() {
+            const yPositions = [40, 80, 120]; // Window heights
+            babies.push({
+                x: 0,
+                y: yPositions[Math.floor(Math.random() * yPositions.length)],
+                vx: 2 + Math.random() * 1,
+                vy: 0.5,
+                width: 10,
+                height: 10
+            });
+        }
+
+        // Check collision between fireman and baby
+        function checkCollision(baby) {
+            return (
+                baby.x < fireman.x + fireman.width &&
+                baby.x + baby.width > fireman.x &&
+                baby.y < fireman.y + fireman.height &&
+                baby.y + baby.height > fireman.y
+            );
+        }
+
+        // Reset game
+        function resetGame() {
+            score = 0;
+            lives = 3;
+            babies = [];
+            fireman.x = 160;
+            gameOver = false;
+            gameOverScreen.style.display = 'none';
+            lastSpawn = Date.now();
+            gameLoop();
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (gameOver) return;
+
+            // Update fireman
+            if (keys.ArrowLeft && fireman.x > 0) fireman.x -= fireman.speed;
+            if (keys.ArrowRight && fireman.x < canvas.width - fireman.width) fireman.x += fireman.speed;
+
+            // Spawn babies
+            if (Date.now() - lastSpawn > spawnInterval) {
+                spawnBaby();
+                lastSpawn = Date.now();
+                spawnInterval = Math.max(1000, spawnInterval - 50); // Increase difficulty
+            }
+
+            // Update babies
+            babies.forEach((baby, index) => {
+                baby.x += baby.vx;
+                baby.y += baby.vy;
+                if (checkCollision(baby)) {
+                    score += 10;
+                    babies.splice(index, 1);
+                } else if (baby.x > canvas.width || baby.y > canvas.height) {
+                    babies.splice(index, 1);
+                    lives--;
+                    if (lives <= 0) {
+                        gameOver = true;
+                        gameOverScreen.style.display = 'block';
+                        finalScoreDisplay.textContent = score;
+                    }
+                }
+            });
+
+            // Draw
+            ctx.fillStyle = colors.black;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw building
+            ctx.fillStyle = colors.magenta;
+            ctx.fillRect(0, 0, 40, canvas.height);
+
+            // Draw windows
+            ctx.fillStyle = colors.cyan;
+            [40, 80, 120].forEach(y => ctx.fillRect(10, y, 20, 20));
+
+            // Draw fireman
+            ctx.fillStyle = colors.white;
+            ctx.fillRect(fireman.x, fireman.y, fireman.width, fireman.height);
+
+            // Draw babies
+            babies.forEach(baby => {
+                ctx.fillStyle = colors.cyan;
+                ctx.fillRect(baby.x, baby.y, baby.width, baby.height);
+            });
+
+            // Draw HUD
+            ctx.fillStyle = colors.white;
+            ctx.font = '10px Courier New';
+            ctx.fillText(`Score: ${score}`, 50, 10);
+            ctx.fillText(`Lives: ${lives}`, 250, 10);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        gameLoop();
+    </script>
+</body>
+</html>
