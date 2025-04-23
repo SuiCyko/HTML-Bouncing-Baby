@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Retro Bouncing Babies</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #gameCanvas {
+            border: 2px solid #fff;
+            image-rendering: pixelated;
+        }
+        #gameOver {
+            position: absolute;
+            color: #fff;
+            font-size: 24px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="320" height="200"></canvas>
+    <div id="gameOver">Game Over!<br>Score: <span id="finalScore"></span><br>Press R to Restart</div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalScoreDisplay = document.getElementById('finalScore');
+
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        console.log('Initial draw');
+
+        let audioCtx = null;
+        let audioInitialized = false;
+
+        function initAudio() {
+            if (!audioInitialized) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    audioInitialized = true;
+                    console.log('Audio initialized');
+                } catch (e) {
+                    console.error('Audio init failed:', e);
+                }
+            }
+        }
+
+        function playSound(type) {
+            if (!audioInitialized || !audioCtx) return;
+            try {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                if (type === 'boing') {
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+                    gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.2);
+                } else if (type === 'splat') {
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(80, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'siren') {
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+                    gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'start') {
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.15);
+                }
+                console.log(`Played sound: ${type}`);
+            } catch (e) {
+                console.error(`Sound error (${type}):`, e);
+            }
+        }
+
+        let gameState = 'title';
+        let fireman = { x: 160, y: 180, width: 20, height: 16, speed: 5 };
+        let ambulance = { x: 270, y: 170, width: 50, height: 30, lightTimer: 0, lightState: 'red' };
+        let babies = [];
+        let splats = [];
+        let score = 0;
+        let lives = 3;
+        let gameOver = false;
+        let lastSpawn = 0;
+        let spawnInterval = 2000;
+        let blinkTimer = 0;
+        let showStartText = true;
+
+        const colors = {
+            black: '#000000',
+            cyan: '#00AAAA',
+            magenta: '#AA00AA',
+            white: '#AAAAAA',
+            red: '#AA0000',
+            blue: '#0000AA'
+        };
+
+        function startGame() {
+            console.log('Starting game');
+            gameState = 'playing';
+            lastSpawn = Date.now();
+            initAudio();
+            playSound('start');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            console.log('Keydown:', e.key);
+            if (gameState === 'title') {
+                startGame();
+            } else if (gameState === 'playing') {
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    keys[e.key] = true;
+                }
+                if (e.key === 'r' && gameOver) resetGame();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (gameState === 'playing' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                keys[e.key] = false;
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            console.log('Canvas clicked');
+            if (gameState === 'title') {
+                startGame();
+            }
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            console.log('Canvas touched');
+            if (gameState === 'title') {
+                startGame();
+            }
+        });
+
+        let keys = { ArrowLeft: false, ArrowRight: false };
+        canvas.addEventListener('mousemove', (e) => {
+            if (gameState === 'playing' && !gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (gameState === 'playing' && !gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.touches[0].clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+
+        function spawnBaby() {
+            const yPositions = [40, 80, 120];
+            babies.push({
+                x: 0,
+                y: yPositions[Math.floor(Math.random() * yPositions.length)],
+                vx: 2 + Math.random() * 1,
+                vy: -2,
+                gravity: 0.2,
+                bounced: false,
+                width: 10,
+                height: 10
+            });
+        }
+
+        function checkCollision(obj1, obj2) {
+            return (
+                obj1.x < obj2.x + obj2.width &&
+                obj1.x + obj1.width > obj2.x &&
+                obj1.y < obj2.y + obj2.height &&
+                obj1.y + obj1.height > obj2.y
+            );
+        }
+
+        function createSplat(x, y) {
+            splats.push({
+                x: x,
+                y: y,
+                radius: 5,
+                duration: 500,
+                startTime: Date.now()
+            });
+            playSound('splat');
+        }
+
+        function resetGame() {
+            console.log('Resetting game');
+            score = 0;
+            lives = 3;
+            babies = [];
+            splats = [];
+            fireman.x = 160;
+            ambulance.x = 270;
+            ambulance.y = 170;
+            ambulance.lightTimer = 0;
+            ambulance.lightState = 'red';
+            gameOver = false;
+            gameState = 'playing';
+            gameOverScreen.style.display = 'none';
+            lastSpawn = Date.now();
+            spawnInterval = 2000;
+        }
+
+        function drawTitleScreen() {
+            try {
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = colors.white;
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('Web-Retro Bouncing Babies', canvas.width / 2, canvas.height / 2 - 20);
+		ctx.fillText('by Greg Chesser',  canvas.width / 2, canvas.height / 2 - 8);
+
+                blinkTimer += 16;
+                if (blinkTimer > 500) {
+                    showStartText = !showStartText;
+                    blinkTimer = 0;
+                }
+                if (showStartText) {
+                    ctx.font = '12px Courier New';
+                    ctx.fillStyle = colors.cyan;
+                    ctx.fillText('Press Start', canvas.width / 2, canvas.height / 2 + 20);
+                }
+
+                let titleAmbulance = { lightTimer: ambulance.lightTimer, lightState: ambulance.lightState };
+                titleAmbulance.lightTimer += 16;
+                if (titleAmbulance.lightTimer > 500) {
+                    titleAmbulance.lightState = titleAmbulance.lightState === 'red' ? 'blue' : 'red';
+                    titleAmbulance.lightTimer = 0;
+                }
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(canvas.width / 2 - 25, canvas.height / 2 + 40, 50, 30);
+                ctx.fillStyle = colors.red;
+                ctx.fillRect(canvas.width / 2 - 5, canvas.height / 2 + 45, 10, 20);
+                ctx.fillRect(canvas.width / 2 - 10, canvas.height / 2 + 50, 20, 10);
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(canvas.width / 2 - 15, canvas.height / 2 + 65, 10, 5);
+                ctx.fillRect(canvas.width / 2 + 5, canvas.height / 2 + 65, 10, 5);
+                ctx.fillStyle = colors[titleAmbulance.lightState];
+                ctx.fillRect(canvas.width / 2 - 20, canvas.height / 2 + 35, 5, 5);
+                ctx.fillRect(canvas.width / 2 + 15, canvas.height / 2 + 35, 5, 5);
+            } catch (e) {
+                console.error('Title render error:', e);
+            }
+        }
+
+        function gameLoop() {
+            if (gameState === 'title') {
+                drawTitleScreen();
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            if (gameOver) {
+                gameState = 'gameOver';
+                return;
+            }
+
+            console.log('Game loop running');
+
+            if (keys.ArrowLeft && fireman.x > 0) fireman.x -= fireman.speed;
+            if (keys.ArrowRight && fireman.x < canvas.width - fireman.width) fireman.x += fireman.speed;
+
+            ambulance.lightTimer += 16;
+            if (ambulance.lightTimer > 500) {
+                ambulance.lightState = ambulance.lightState === 'red' ? 'blue' : 'red';
+                ambulance.lightTimer = 0;
+            }
+
+            if (Date.now() - lastSpawn > spawnInterval) {
+                spawnBaby();
+                lastSpawn = Date.now();
+                spawnInterval = Math.max(1000, spawnInterval - 50);
+            }
+
+            babies.forEach((baby, index) => {
+                baby.x += baby.vx;
+                baby.y += baby.vy;
+                baby.vy += baby.gravity;
+
+                if (baby.y + baby.height > canvas.height) {
+                    createSplat(baby.x, baby.y);
+                    babies.splice(index, 1);
+                    lives--;
+                    if (lives <= 0) {
+                        gameOver = true;
+                        gameOverScreen.style.display = 'block';
+                        finalScoreDisplay.textContent = score;
+                    }
+                    return;
+                }
+
+                if (!baby.bounced && checkCollision(baby, fireman)) {
+                    baby.bounced = true;
+                    baby.vx = 3.5 + Math.random() * 1;
+                    baby.vy = -4.5;
+                    playSound('boing');
+                }
+
+                if (baby.bounced && checkCollision(baby, ambulance)) {
+                    score += 10;
+                    babies.splice(index, 1);
+                    playSound('siren');
+                }
+            });
+
+            splats = splats.filter(splat => Date.now() - splat.startTime < splat.duration);
+
+            try {
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = colors.magenta;
+                ctx.fillRect(0, 0, 40, canvas.height);
+
+                ctx.fillStyle = colors.cyan;
+                [40, 80, 120].forEach(y => ctx.fillRect(10, y, 20, 20));
+
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(fireman.x, fireman.y, fireman.width, fireman.height);
+
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(ambulance.x, ambulance.y, ambulance.width, ambulance.height);
+                ctx.fillStyle = colors.red;
+                ctx.fillRect(ambulance.x + 20, ambulance.y + 5, 10, 20);
+                ctx.fillRect(ambulance.x + 15, ambulance.y + 10, 20, 10);
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(ambulance.x + 10, ambulance.y + 25, 10, 5);
+                ctx.fillRect(ambulance.x + 30, ambulance.y + 25, 10, 5);
+                ctx.fillStyle = colors[ambulance.lightState];
+                ctx.fillRect(ambulance.x + 5, ambulance.y - 5, 5, 5);
+                ctx.fillRect(ambulance.x + 40, ambulance.y - 5, 5, 5);
+
+                babies.forEach(baby => {
+                    ctx.fillStyle = colors.cyan;
+                    ctx.fillRect(baby.x, baby.y, baby.width, baby.height);
+                });
+
+                splats.forEach(splat => {
+                    ctx.fillStyle = colors.magenta;
+                    ctx.beginPath();
+                    ctx.arc(splat.x + 5, splat.y + 5, splat.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = colors.white;
+                ctx.font = '10px Courier New';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Score: ${score}`, 50, 10);
+                ctx.fillText(`Lives: ${lives}`, 250, 10);
+            } catch (e) {
+                console.error('Render error:', e);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        console.log('Game started');
+        gameLoop();
+    </script>
+</body>
+</html>
