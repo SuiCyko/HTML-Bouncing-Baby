@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Retro Bouncing Babies</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #gameCanvas {
+            border: 2px solid #fff;
+            image-rendering: pixelated;
+        }
+        #gameOver {
+            position: absolute;
+            color: #fff;
+            font-size: 60px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="gameOver">Game Over!<br>Score: <span id="finalScore"></span><br>Press R to Restart</div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalScoreDisplay = document.getElementById('finalScore');
+
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        console.log('Initial draw');
+
+        let audioCtx = null;
+        let audioInitialized = false;
+
+        function initAudio() {
+            if (!audioInitialized) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    audioInitialized = true;
+                    console.log('Audio initialized');
+                } catch (e) {
+                    console.error('Audio init failed:', e);
+                }
+            }
+        }
+
+        function playSound(type) {
+            if (!audioInitialized || !audioCtx) return;
+            try {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                if (type === 'boing') {
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+                    gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.2);
+                } else if (type === 'splat') {
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(80, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'siren') {
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+                    gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'start') {
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.15);
+                }
+                console.log(`Played sound: ${type}`);
+            } catch (e) {
+                console.error(`Sound error (${type}):`, e);
+            }
+        }
+
+        let gameState = 'title';
+        let fireman = { x: 400, y: 550, width: 50, height: 40, speed: 12.5 };
+        let ambulance = { x: 675, y: 500, width: 125, height: 75, lightTimer: 0, lightState: 'red' };
+        let babies = [];
+        let splats = [];
+        let score = 0;
+        let lives = 3;
+        let gameOver = false;
+        let lastSpawn = 0;
+        let spawnInterval = 2000;
+        let blinkTimer = 0;
+        let showStartText = true;
+
+        const colors = {
+            black: '#000000',
+            cyan: '#00AAAA',
+            magenta: '#AA00AA',
+            white: '#AAAAAA',
+            red: '#AA0000',
+            blue: '#0000AA'
+        };
+
+        function startGame() {
+            console.log('Starting game');
+            gameState = 'playing';
+            lastSpawn = Date.now();
+            initAudio();
+            playSound('start');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            console.log('Keydown:', e.key);
+            if (gameState === 'title') {
+                startGame();
+            } else if (gameState === 'playing') {
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    keys[e.key] = true;
+                }
+            } else if (gameState === 'gameOver' && e.key.toLowerCase() === 'r') {
+                console.log('Restart triggered');
+                resetGame();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (gameState === 'playing' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                keys[e.key] = false;
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            console.log('Canvas clicked');
+            if (gameState === 'title') {
+                startGame();
+            }
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            console.log('Canvas touched');
+            if (gameState === 'title') {
+                startGame();
+            }
+        });
+
+        let keys = { ArrowLeft: false, ArrowRight: false };
+        canvas.addEventListener('mousemove', (e) => {
+            if (gameState === 'playing' && !gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (gameState === 'playing' && !gameOver) {
+                const rect = canvas.getBoundingClientRect();
+                fireman.x = e.touches[0].clientX - rect.left - fireman.width / 2;
+                if (fireman.x < 0) fireman.x = 0;
+                if (fireman.x > canvas.width - fireman.width) fireman.x = canvas.width - fireman.width;
+            }
+        });
+
+        function spawnBaby() {
+            const yPositions = [100, 200, 300];
+            const baby = {
+                x: 0,
+                y: yPositions[Math.floor(Math.random() * yPositions.length)],
+                vx: 2 + Math.random() * 1,
+                vy: -3,
+                gravity: 0.2,
+                bouncesNeeded: Math.floor(Math.random() * 3) + 1,
+                width: 25,
+                height: 25,
+                lastBounceTime: Date.now()
+            };
+            console.log(`Spawned baby with bouncesNeeded: ${baby.bouncesNeeded}, vx: ${baby.vx}, vy: ${baby.vy}`);
+            babies.push(baby);
+        }
+
+        function checkCollision(obj1, obj2) {
+            const buffer = 10;
+            return (
+                obj1.x < obj2.x + obj2.width + buffer &&
+                obj1.x + obj1.width > obj2.x - buffer &&
+                obj1.y < obj2.y + obj2.height + buffer &&
+                obj1.y + obj1.height > obj2.y - buffer
+            );
+        }
+
+        function createSplat(x, y) {
+            splats.push({
+                x: x,
+                y: y,
+                radius: 12.5,
+                duration: 500,
+                startTime: Date.now()
+            });
+            playSound('splat');
+        }
+
+        function resetGame() {
+            console.log('Resetting game');
+            score = 0;
+            lives = 3;
+            babies = [];
+            splats = [];
+            fireman.x = 400;
+            ambulance.x = 675;
+            ambulance.y = 500;
+            ambulance.lightTimer = 0;
+            ambulance.lightState = 'red';
+            gameOver = false;
+            gameState = 'playing';
+            gameOverScreen.style.display = 'none';
+            lastSpawn = Date.now();
+            spawnInterval = 2000;
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawTitleScreen() {
+            try {
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = colors.white;
+                ctx.font = '40px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('Web-Retro Bouncing Babies', canvas.width / 2, canvas.height / 2 - 50);
+		ctx.fillText('By Greg Chesser', canvas.width / 2, canvas.height / 2 - 20);
+
+                blinkTimer += 16;
+                if (blinkTimer > 500) {
+                    showStartText = !showStartText;
+                    blinkTimer = 0;
+                }
+                if (showStartText) {
+                    ctx.font = '30px Courier New';
+                    ctx.fillStyle = colors.cyan;
+                    ctx.fillText('Press Start', canvas.width / 2, canvas.height / 2 + 50);
+                }
+
+                let titleAmbulance = { x: canvas.width / 2 - 62.5, y: canvas.height / 2 + 100, lightTimer: ambulance.lightTimer, lightState: ambulance.lightState };
+                titleAmbulance.lightTimer += 16;
+                if (titleAmbulance.lightTimer > 500) {
+                    titleAmbulance.lightState = titleAmbulance.lightState === 'red' ? 'blue' : 'red';
+                    titleAmbulance.lightTimer = 0;
+                }
+                // Draw rear-end ambulance
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(titleAmbulance.x, titleAmbulance.y, 125, 75); // Rear doors
+                ctx.fillStyle = colors.red;
+                ctx.fillRect(titleAmbulance.x + 50, titleAmbulance.y + 12.5, 25, 50); // Vertical cross
+                ctx.fillRect(titleAmbulance.x + 37.5, titleAmbulance.y + 25, 50, 25); // Horizontal cross
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(titleAmbulance.x + 25, titleAmbulance.y + 62.5, 25, 12.5); // Left wheel
+                ctx.fillRect(titleAmbulance.x + 75, titleAmbulance.y + 62.5, 25, 12.5); // Right wheel
+                ctx.fillStyle = colors[titleAmbulance.lightState];
+                ctx.fillRect(titleAmbulance.x + 12.5, titleAmbulance.y - 12.5, 12.5, 12.5); // Left light
+                ctx.fillRect(titleAmbulance.x + 100, titleAmbulance.y - 12.5, 12.5, 12.5); // Right light
+            } catch (e) {
+                console.error('Title render error:', e);
+            }
+        }
+
+        function gameLoop() {
+            if (gameState === 'title') {
+                drawTitleScreen();
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            if (gameOver) {
+                gameState = 'gameOver';
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            console.log('Game loop running');
+
+            if (keys.ArrowLeft && fireman.x > 0) fireman.x -= fireman.speed;
+            if (keys.ArrowRight && fireman.x < canvas.width - fireman.width) fireman.x += fireman.speed;
+
+            ambulance.lightTimer += 16;
+            if (ambulance.lightTimer > 500) {
+                ambulance.lightState = ambulance.lightState === 'red' ? 'blue' : 'red';
+                ambulance.lightTimer = 0;
+            }
+
+            if (Date.now() - lastSpawn > spawnInterval) {
+                spawnBaby();
+                lastSpawn = Date.now();
+                spawnInterval = Math.max(1000, spawnInterval - 50);
+            }
+
+            babies.forEach((baby, index) => {
+                baby.x += baby.vx;
+                baby.y += baby.vy;
+                baby.vy += baby.gravity;
+
+                if (baby.bouncesNeeded <= 0) {
+                    console.log(`Score attempt: baby.x=${baby.x}, baby.y=${baby.y}, ambulance.x=${ambulance.x}, ambulance.y=${ambulance.y}`);
+                    if (checkCollision(baby, ambulance) || (baby.y < ambulance.y + 50 && baby.x > ambulance.x - 100)) {
+                        score += 10;
+                        babies.splice(index, 1);
+                        playSound('siren');
+                        console.log('Baby scored (ambulance or overshoot)');
+                        return;
+                    }
+                }
+
+                if (baby.y + baby.height > canvas.height) {
+                    createSplat(baby.x, baby.y);
+                    babies.splice(index, 1);
+                    lives--;
+                    if (lives <= 0) {
+                        gameOver = true;
+                        gameOverScreen.style.display = 'block';
+                        finalScoreDisplay.textContent = score;
+                    }
+                    return;
+                }
+
+                if (baby.bouncesNeeded > 0 && Date.now() - baby.lastBounceTime > 200 && checkCollision(baby, fireman)) {
+                    console.log(`Catch attempt: baby.x=${baby.x}, baby.y=${baby.y}, fireman.x=${fireman.x}, fireman.y=${fireman.y}, bouncesNeeded=${baby.bouncesNeeded}, timeSinceLast=${Date.now() - baby.lastBounceTime}`);
+                    baby.bouncesNeeded--;
+                    baby.lastBounceTime = Date.now();
+                    if (baby.bouncesNeeded > 0) {
+                        baby.vx = 1 + Math.random() * 1;
+                        baby.vy = -8;
+                    } else {
+                        baby.vx = 3 + Math.random() * 1;
+                        baby.vy = -10;
+                    }
+                    playSound('boing');
+                    console.log(`Baby bounced, bouncesNeeded: ${baby.bouncesNeeded}, vx: ${baby.vx}, vy: ${baby.vy}`);
+                }
+            });
+
+            splats = splats.filter(splat => Date.now() - splat.startTime < splat.duration);
+
+            try {
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = colors.magenta;
+                ctx.fillRect(0, 0, 100, canvas.height);
+
+                ctx.fillStyle = colors.cyan;
+                [100, 200, 300].forEach(y => ctx.fillRect(25, y, 50, 50));
+
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(fireman.x, fireman.y, fireman.width, fireman.height);
+
+                // Draw rear-end ambulance
+                ctx.fillStyle = colors.white;
+                ctx.fillRect(ambulance.x, ambulance.y, ambulance.width, ambulance.height); // Rear doors
+                ctx.fillStyle = colors.red;
+                ctx.fillRect(ambulance.x + 50, ambulance.y + 12.5, 25, 50); // Vertical cross
+                ctx.fillRect(ambulance.x + 37.5, ambulance.y + 25, 50, 25); // Horizontal cross
+                ctx.fillStyle = colors.black;
+                ctx.fillRect(ambulance.x + 25, ambulance.y + 62.5, 25, 12.5); // Left wheel
+                ctx.fillRect(ambulance.x + 75, ambulance.y + 62.5, 25, 12.5); // Right wheel
+                ctx.fillStyle = colors[ambulance.lightState];
+                ctx.fillRect(ambulance.x + 12.5, ambulance.y - 12.5, 12.5, 12.5); // Left light
+                ctx.fillRect(ambulance.x + 100, ambulance.y - 12.5, 12.5, 12.5); // Right light
+
+                babies.forEach(baby => {
+                    ctx.fillStyle = colors.cyan;
+                    ctx.fillRect(baby.x, baby.y, baby.width, baby.height);
+                });
+
+                splats.forEach(splat => {
+                    ctx.fillStyle = colors.magenta;
+                    ctx.beginPath();
+                    ctx.arc(splat.x + 12.5, splat.y + 12.5, splat.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = colors.white;
+                ctx.font = '25px Courier New';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Score: ${score}`, 125, 25);
+                ctx.fillText(`Lives: ${lives}`, 625, 25);
+            } catch (e) {
+                console.error('Render error:', e);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        console.log('Game started');
+        gameLoop();
+    </script>
+</body>
+</html>
